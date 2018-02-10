@@ -173,7 +173,7 @@ if __name__ == '__main__':
   # confusion_matrix = sum of all the confusion matrixes of all the patches [np.array matrix]
   # mean_acc = mean pixel-wise accuracy (correct pixels / all) [scalar]
   # mean_iou = mean intersection over union (IoU, or Jaccard Index) [scalar]
-  # per_class_iou = pixel-wise intersection over union of each class []
-  # per_class_prec = pixel-wise precision of each class
-  # per_class_rec = pixel-wise
-  # kappa = kappa coefficient for the classifier
+  # per_class_iou = pixel-wise intersection over union of each class [list of scalars]
+  # per_class_prec = pixel-wise precision of each class [list of scalars]
+  # per_class_rec = pixel-wise [list of scalars]
+  # kappa = kappa coefficient for the classifier [scalar]
