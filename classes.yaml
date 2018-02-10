@@ -1,6 +1,9 @@
 patch_size: # in pixels
   w: 3504
   h: 3452
+semantic_label_prefix: "TLS_indMap_" # how to look for a semantic label
+instance_label_prefix: "TLS_instances_building_" # how to look for an instance label
+label_format: ".tif"        # format of label
 # color and index mappers
 idx_to_name:
   0: "Void"
