@@ -27,20 +27,28 @@ def pix_metrics_from_confusion(confusion):
       mean iou
       per class precision
       per class recall
+      kappa coefficient
   '''
+  conf = confusion.astype(np.float32)
+
   # calculate accuracy from confusion
-  if confusion.sum():
-    mean_acc = np.diag(confusion).sum() / confusion.sum()
+  if conf.sum():
+    mean_acc = np.diag(conf).sum() / conf.sum()
   else:
     mean_acc = 0
 
   # calculate IoU
-  per_class_iou = np.divide(np.diag(confusion), confusion.sum(
-      0) + confusion.sum(1) - np.diag(confusion))
+  per_class_iou = np.divide(np.diag(conf), conf.sum(
+      0) + conf.sum(1) - np.diag(conf))
   mean_iou = np.nanmean(per_class_iou)
 
   # calculate precision and recall
-  per_class_prec = np.divide(np.diag(confusion), confusion.sum(0))
-  per_class_rec = np.divide(np.diag(confusion), confusion.sum(1))
+  per_class_prec = np.divide(np.diag(conf), conf.sum(0))
+  per_class_rec = np.divide(np.diag(conf), conf.sum(1))
 
-  return mean_acc, mean_iou, per_class_iou, per_class_prec, per_class_rec
+  # calculate kappa
+  observed_acc = mean_acc
+  expected_acc = np.divide(np.dot(conf.sum(0), conf.sum(1)), conf.sum()**2)
+  kappa = np.divide(observed_acc - expected_acc, 1 - expected_acc)
+
+  return mean_acc, mean_iou, per_class_iou, per_class_prec, per_class_rec, kappa
