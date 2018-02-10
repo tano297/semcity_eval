@@ -1,0 +1,30 @@
+patch_size: # in pixels
+  w: 3504
+  h: 3452
+# color and index mappers
+idx_to_name:
+  0: "Void"
+  1: "Impervious Surface"
+  2: "Building"
+  3: "Pervious Surface"
+  4: "Treeline"
+  5: "Car"
+  6: "Water"
+idx_to_description:
+  0: "Void: undefinable, shades"
+  1: "Impervious Surface: street, pavement, concrete"
+  2: "Building: buildings, other objects (e.g. solar-cells)"
+  3: "Pervious Surface: grass, low vegetation, soil"
+  4: "Treeline: tree"
+  5: "Car: car"
+  6: "Water: natural water, swimming pools"
+idx_to_color: # color in BGR
+  0: [255, 255, 255]  # white
+  1: [38, 38, 38]     # dark gray
+  2: [33, 118, 238]   # orange
+  3: [34, 139, 34]    # dark green
+  4: [137, 222, 0]    # light green
+  5: [0, 0, 255]      # pure red      
+  6: [238, 0, 0]      # blue
+
+
