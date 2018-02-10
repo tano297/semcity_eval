@@ -35,12 +35,12 @@ def pix_metrics_from_confusion(confusion):
     mean_acc = 0
 
   # calculate IoU
-  per_class_iou = np.diag(confusion) / (confusion.sum(0) +
-                                        confusion.sum(1) - np.diag(confusion))
+  per_class_iou = np.divide(np.diag(confusion), confusion.sum(
+      0) + confusion.sum(1) - np.diag(confusion))
   mean_iou = np.nanmean(per_class_iou)
 
   # calculate precision and recall
-  per_class_prec = np.diag(confusion) / confusion.sum(0)
-  per_class_rec = np.diag(confusion) / confusion.sum(1)
+  per_class_prec = np.divide(np.diag(confusion), confusion.sum(0))
+  per_class_rec = np.divide(np.diag(confusion), confusion.sum(1))
 
   return mean_acc, mean_iou, per_class_iou, per_class_prec, per_class_rec
