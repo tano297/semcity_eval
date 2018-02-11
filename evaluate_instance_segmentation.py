@@ -134,22 +134,34 @@ if __name__ == '__main__':
 
   # since lists are sorted, and we have 1 to 1 mapping for all files, and
   # knowing that 2 files don't have the same name, we can assume pass them
-  # directly to the evaluator after opening them
-  sub_tifs = []
-  lbl_tifs = []
+  # directly to the evaluator after opening them, and converting them to
+  # instance polygons (it is expensive and we only want to do it once)
+  sub_instances = []
+  lbl_instances = []
 
   for s in submissions:
     # open submission
-    sub_tif = Image.open(os.path.join(FLAGS.submission_dir, s))
-    sub_tifs.append(np.array(sub_tif))
+    sub = os.path.join(FLAGS.submission_dir, s)
+    print("Extracting polygons from submission ", sub)
+    sub_tif = Image.open(sub)
+    sub_inst = metrics.get_instances(np.array(sub_tif).astype(np.int32))
+    sub_instances.append(sub_inst)
     # open label
-    lbl_tif = Image.open(os.path.join(FLAGS.label_dir, s))
-    lbl_tifs.append(np.array(lbl_tif))
+    lbl = os.path.join(FLAGS.label_dir, s)
+    print("Extracting polygons from label ", lbl)
+    lbl_tif = Image.open(lbl)
+    lbl_inst = metrics.get_instances(np.array(lbl_tif).astype(np.int32))
+    lbl_instances.append(lbl_inst)
 
   # calculate all the metrics
-  for iou in np.arange(0.5, 0.95, 0.05):
+  iou_range = np.arange(0.5, 0.96, 0.05)
+  AP_50_95 = 0
+  AP_50 = 0
+  AP_75 = 0
+  for iou in iou_range:
     AP, REC, TP, FP, FN = metrics.calculate_AP_for_iou_multi_image(
-        sub_tifs, lbl_tifs, iou)
+        sub_instances, lbl_instances, iou)
+    AP_50_95 += AP
     print("===========")
     print("IoU: ", iou)
     print("AP: ", AP)
@@ -157,7 +169,18 @@ if __name__ == '__main__':
     print("TP: ", TP, ", FP: ", FP, ", FN: ", FN)
     print("===========")
 
+    if iou > 0.4 and iou < 0.6:
+      AP_50 = AP
+    elif iou > 0.74 and iou < 0.76:
+      AP_75 = AP
+
+  # average all the different IoU Average Precisions
+  AP_50_95 /= iou_range.size
+
   # print if in verbose mode
+  print("AP 50-95: ", AP_50_95)
+  print("AP 50: ", AP_50)
+  print("AP 75: ", AP_75)
 
   # in summary:
   # AP_50_95 is a scalar containing the mean Average Precision in IoU range [0.5:0.05:0.95]

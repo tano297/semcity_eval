@@ -2,6 +2,8 @@
 
 import numpy as np
 import cv2
+import time
+from shapely import geometry
 
 ################################################################################
 #####################  Semantic Segmentation Metrics  ##########################
@@ -66,7 +68,24 @@ def pix_metrics_from_confusion(confusion):
 def polygon_iou(poly1, poly2):
   """ Given 2 polygons, calculate the Intersection over Union
   """
-  iou = 0
+  # time_start = time.time()
+
+  # get intersection over union
+  try:
+    intersection = poly1.intersection(poly2).area
+    union = poly1.union(poly2).area
+  except Exception:
+    # invalid geometry
+    return 0
+
+  # valid geometry
+  if union > 0:
+    iou = intersection / union
+  else:
+    iou = 0
+
+  # elapsed = time.time() - time_start
+  # print("elapsed iou", elapsed)
 
   return iou
 
@@ -81,23 +100,48 @@ def get_instances(image):
   # sanity check
   assert(len(image.shape) == 2)
 
-  # instances are given from 1 to N-instance, with 0 being background.
-  # therefore the max element will contain the max number of instances in the
-  # image, which is the same as the number of polygons
-  n_poly = np.amax(image)
+  # instances are given from 1 to N, and may contain skipping values, so we
+  # need a histogram of the pixels in the image and only add the ones containing
+  # pixels to the range.
+  poly_range = []
+  hist_bins = np.amax(image) + 1
+  hist = np.bincount(image.flatten(), minlength=hist_bins)
+
+  # get the actual buildings from histogram
+  for i in range(1, hist_bins):  # start in 1 to ignore background
+    if hist[i] > 0:
+      poly_range.append(i)
 
   # for each patch of value val, convert to polygon and append to
   # list of polygons
-  for val in range(1, n_poly):
+  for val in poly_range:
+    # time_start = time.time()
     # get the mask
-    poly_mask = np.zeros(image.shape, dtype=np.int8)
-    poly_mask[image == val] = 1
+    poly_mask = cv2.compare(image, val, cv2.CMP_EQ)
 
     # convert to poly using contours
-    _, poly, _ = cv2.findContours(
+    img, poly, _ = cv2.findContours(
         poly_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-    instances.append(poly)
+    # ignore all poligons with less than 3 coordinates.
+    try:
+      shapelu_poly = np.reshape(poly[0], [poly[0].shape[0], poly[0].shape[2]])
+      shapely_poly = geometry.Polygon(shapelu_poly)
+      instances.append(shapely_poly)
+    except Exception:
+      print("Warning: Ignoring polygon: ",
+            poly[0], " because it is not a valid geometry")
+
+    # elapsed = time.time() - time_start
+    # print("poly time: ", elapsed)
+
+    # cv2.namedWindow("img", cv2.WINDOW_NORMAL)
+    # print("contour type", type(poly))
+    # print("contour: ", poly)
+    # cv2.drawContours(img, poly, -1, (0, 255, 0), 50)
+
+    # cv2.imshow("img", img)
+    # cv2.waitKey(1)
 
   return instances
 
@@ -113,7 +157,7 @@ def match_instances(instance, label_instances):
   for lbl_instance in label_instances:
     # if iou with this instance is bigger than the IoU contained in the
     # prediction, match them
-    iou = polygon_iou(instance["poly"], lbl_instance["poly"])
+    iou = polygon_iou(instance["polygon"], lbl_instance["polygon"])
     if iou > instance["iou"]:
       instance["iou"] = iou
       instance["label_poly_idx"] = label_instances.index(lbl_instance)
@@ -134,18 +178,16 @@ def calculate_AP_for_iou_single_image(mask, label, IoU_th):
   FP = 0
   FN = 0
 
-  # get each instance from the label image
-  # each instance is a polygon, and a flag if it has been detected or not as
-  # a dictionary
-  label_instances = get_instances(label)
-  for poly in label_instances:
-    poly = {"polygon": poly, "marked": False}
+  print("AP for single image")
 
-  # get each instance from the mask (prediction) image
-  # each instance is a polygon
-  mask_instances = get_instances(mask)
-  for poly in mask_instances:
-    poly = {"polygon": poly, "iou": 0, "label_poly_idx": -1}
+  # each label instance is a polygon, and a flag if it has been detected or not
+  # as a dictionary
+  label_instances = [{"polygon": poly, "marked": False}
+                     for poly in label]
+
+  # each mask instance is a polygon
+  mask_instances = [{"polygon": poly, "iou": 0, "label_poly_idx": -1}
+                    for poly in mask]
 
   # for each prediction in the mask, check the IoU with the labels
   for instance in mask_instances:
