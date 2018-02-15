@@ -8,6 +8,7 @@ import sys
 from PIL import Image  # for tif image
 import metrics
 import builtins
+import time
 
 # redefine print so we can adjust verbosity
 verbose = True
@@ -140,17 +141,31 @@ if __name__ == '__main__':
   lbl_instances = []
 
   for s in submissions:
-    # open submission
+    # open submission, get instances, and put in submission structure
     sub = os.path.join(FLAGS.submission_dir, s)
     print("Extracting polygons from submission ", sub)
     sub_tif = Image.open(sub)
     sub_inst = metrics.get_instances(np.array(sub_tif).astype(np.int32))
-    sub_instances.append(sub_inst)
-    # open label
+    sub_inst = metrics.poly_to_poly_struct(
+        sub_inst, instance_type="prediction")
+
+    # open label, get instances, and put in label structure
     lbl = os.path.join(FLAGS.label_dir, s)
     print("Extracting polygons from label ", lbl)
     lbl_tif = Image.open(lbl)
     lbl_inst = metrics.get_instances(np.array(lbl_tif).astype(np.int32))
+    lbl_inst, lbl_strtree = metrics.poly_to_poly_struct(
+        lbl_inst, instance_type="label")
+
+    # match the instances and fill in the iou metric for each connection
+    time_start = time.time()
+    for inst in sub_inst:
+      metrics.match_instances(inst, lbl_inst, lbl_strtree)
+    elapsed = time.time() - time_start
+    print("time to intersect ", elapsed)
+
+    # append matched instances to each list
+    sub_instances.append(sub_inst)
     lbl_instances.append(lbl_inst)
 
   # calculate all the metrics

@@ -2,8 +2,10 @@
 
 import numpy as np
 import cv2
+import sys
 import time
 from shapely import geometry
+from shapely import strtree
 
 ################################################################################
 #####################  Semantic Segmentation Metrics  ##########################
@@ -121,13 +123,20 @@ def get_instances(image):
 
     # convert to poly using contours
     img, poly, _ = cv2.findContours(
-        poly_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        poly_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # ignore all poligons with less than 3 coordinates.
     try:
-      shapelu_poly = np.reshape(poly[0], [poly[0].shape[0], poly[0].shape[2]])
-      shapely_poly = geometry.Polygon(shapelu_poly)
-      instances.append(shapely_poly)
+      shapely_poly = np.reshape(poly[0], [poly[0].shape[0], poly[0].shape[2]])
+      shapely_poly = geometry.Polygon(shapely_poly)
+
+      # if it is not valid, validate with buffer(0) method
+      if shapely_poly.is_valid:
+        instances.append(shapely_poly)
+      else:
+        shapely_poly = shapely_poly.buffer(0)
+        if shapely_poly.is_valid:
+          instances.append(shapely_poly)
     except Exception:
       print("Warning: Ignoring polygon: ",
             poly[0], " because it is not a valid geometry")
@@ -146,15 +155,48 @@ def get_instances(image):
   return instances
 
 
-def match_instances(instance, label_instances):
+def poly_to_poly_struct(instances, instance_type=""):
+  """
+    Fill the standard structure for instances depending on each class of
+    instance
+  """
+  if instance_type == "label":
+    # each label instance is a polygon, and a flag if it has been detected or not
+    # as a dictionary
+    struct_instances = [{"polygon": poly, "marked": False}
+                        for poly in instances]
+    strtree_instances = strtree.STRtree(instances)
+    return struct_instances, strtree_instances
+  elif instance_type == "prediction":
+    # each mask instance is a polygon
+    struct_instances = [{"polygon": poly, "iou": 0, "label_poly_idx": -1}
+                        for poly in instances]
+    return struct_instances
+  else:
+    print("Invalid instance type: ", str(instance_type))
+    sys.exit(-1)
+
+
+def match_instances(instance, label_instances, label_instances_strtree):
   """ Given an instance polygon, and a list of polygons and marks, return:
       The IoU with an instance of ground truth if it corresponds.
       The index of that ground truth index if it corresponds.
       Each polygon gets matched to the biggest corresponding IoU in the GT.
   """
 
+  # query all labels that intersect with the instance
+  intersection = label_instances_strtree.query(instance["polygon"])
+
+  # get all struct instances that are in intersection. This is suboptimal, but
+  # until I find a way to piggy back the info into the strtree I can't deal
+  # with it differently
+  instance_intersection = []
+  for inst in label_instances:
+    if inst in intersection:
+      instance_intersection.append(inst)
+
   # check each label instance with the instance
-  for lbl_instance in label_instances:
+  for lbl_instance in instance_intersection:
     # if iou with this instance is bigger than the IoU contained in the
     # prediction, match them
     iou = polygon_iou(instance["polygon"], lbl_instance["polygon"])
@@ -178,36 +220,26 @@ def calculate_AP_for_iou_single_image(mask, label, IoU_th):
   FP = 0
   FN = 0
 
-  print("AP for single image")
-
-  # each label instance is a polygon, and a flag if it has been detected or not
-  # as a dictionary
-  label_instances = [{"polygon": poly, "marked": False}
-                     for poly in label]
-
-  # each mask instance is a polygon
-  mask_instances = [{"polygon": poly, "iou": 0, "label_poly_idx": -1}
-                    for poly in mask]
+  # reset the "marked" field for the labels
+  for lbl in label:
+    lbl["marked"] = False
 
   # for each prediction in the mask, check the IoU with the labels
-  for instance in mask_instances:
-    # match the instance to the gt instances if possible
-    match_instances(instance, label_instances)
-
+  for instance in mask:
     # if the intersection IoU overlaps more than the threshold
     if instance["iou"] > IoU_th:
       # and the instance hasn't been detected yet, mark as true positive, and
       # mark the GT instance as already detected.
-      if label_instances[instance["label_poly_idx"]]["marked"] is False:
+      if label[instance["label_poly_idx"]]["marked"] is False:
         TP += 1
-        label_instances[instance["label_poly_idx"]]["marked"] = True
+        label[instance["label_poly_idx"]]["marked"] = True
       else:
         FP += 1
     else:
       FP += 1
 
   # as a last step, mark all the missed gt instances as False Negatives
-  for instance in label_instances:
+  for instance in label:
     if instance["marked"] is False:
       FN += 1
 
