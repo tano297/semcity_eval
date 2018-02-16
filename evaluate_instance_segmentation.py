@@ -144,29 +144,29 @@ if __name__ == '__main__':
     # open submission, get instances, and put in submission structure
     sub = os.path.join(FLAGS.submission_dir, s)
     print("Extracting polygons from submission ", sub)
-    sub_tif = Image.open(sub)
-    sub_inst = metrics.get_instances(np.array(sub_tif).astype(np.int32))
-    sub_inst = metrics.poly_to_poly_struct(
-        sub_inst, instance_type="prediction")
+    sub_np = np.array(Image.open(sub)).astype(np.int32)
+    sub_bboxes, sub_vals = metrics.get_instances(sub_np)
+    sub_bboxes = metrics.inst_to_inst_struct(
+        sub_bboxes, sub_vals, instance_type="prediction")
 
     # open label, get instances, and put in label structure
     lbl = os.path.join(FLAGS.label_dir, s)
     print("Extracting polygons from label ", lbl)
-    lbl_tif = Image.open(lbl)
-    lbl_inst = metrics.get_instances(np.array(lbl_tif).astype(np.int32))
-    lbl_inst, lbl_strtree = metrics.poly_to_poly_struct(
-        lbl_inst, instance_type="label")
+    lbl_np = np.array(Image.open(lbl)).astype(np.int32)
+    lbl_bboxes, lbl_vals = metrics.get_instances(lbl_np)
+    lbl_bboxes, lbl_strtree = metrics.inst_to_inst_struct(
+        lbl_bboxes, lbl_vals, instance_type="label")
 
     # match the instances and fill in the iou metric for each connection
     time_start = time.time()
-    for inst in sub_inst:
-      metrics.match_instances(inst, lbl_inst, lbl_strtree)
+    for inst in sub_bboxes:
+      metrics.match_instances(inst, lbl_bboxes, lbl_strtree, sub_np, lbl_np)
     elapsed = time.time() - time_start
     print("time to intersect ", elapsed)
 
     # append matched instances to each list
-    sub_instances.append(sub_inst)
-    lbl_instances.append(lbl_inst)
+    sub_instances.append(sub_bboxes)
+    lbl_instances.append(lbl_bboxes)
 
   # calculate all the metrics
   iou_range = np.arange(0.5, 0.96, 0.05)

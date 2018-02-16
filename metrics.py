@@ -3,7 +3,6 @@
 import numpy as np
 import cv2
 import sys
-import time
 from shapely import geometry
 from shapely import strtree
 
@@ -21,9 +20,12 @@ def calculate_confusion(mask, lbl, num_classes):
   # flatten label and cast
   flat_label = np.array(lbl).flatten().astype(np.uint32)
   # get the histogram
+  histrange = np.array([[-0.5, num_classes - 0.5],
+                        [-0.5, num_classes - 0.5]], dtype='float64')
   confusion, _, _ = np.histogram2d(flat_label,
                                    flat_mask,
-                                   bins=num_classes)
+                                   bins=num_classes,
+                                   range=histrange)
   return confusion
 
 
@@ -67,37 +69,45 @@ def pix_metrics_from_confusion(confusion):
 ################################################################################
 ###################### Instance Segmentation Metrics ###########################
 
-def polygon_iou(poly1, poly2):
-  """ Given 2 polygons, calculate the Intersection over Union
+def inst_iou(sub_bbox, sub_val, sub_np, lbl_bbox, lbl_val, lbl_np):
+  """ Given 2 bboxes and the images, calculate the Intersection over Union
   """
-  # time_start = time.time()
 
-  # get intersection over union
-  try:
-    intersection = poly1.intersection(poly2).area
-    union = poly1.union(poly2).area
-  except Exception:
-    # invalid geometry
+  # create common ROI with the union of the bboxes
+  ROI = sub_bbox.union(lbl_bbox).bounds
+  min_x = int(ROI[0])
+  min_y = int(ROI[1])
+  max_x = int(ROI[2])
+  max_y = int(ROI[3])
+
+  # extract ROI from images with the bboxes
+  sub_ROI = sub_np[min_y:max_y, min_x:max_x]
+  lbl_ROI = lbl_np[min_y:max_y, min_x:max_x]
+
+  # mask to get IoU
+  sub_mask = np.zeros(sub_ROI.shape)
+  sub_mask[sub_ROI == sub_val] = 1
+  lbl_mask = np.zeros(lbl_ROI.shape)
+  lbl_mask[lbl_ROI == lbl_val] = 1
+
+  # at this point, if there is no intersection, the sub_mask will be zeros
+  if np.amax(sub_mask) < 1:
     return 0
 
-  # valid geometry
-  if union > 0:
-    iou = intersection / union
-  else:
-    iou = 0
-
-  # elapsed = time.time() - time_start
-  # print("elapsed iou", elapsed)
+  # get intersection over union
+  conf = calculate_confusion(sub_mask, lbl_mask, num_classes=2)
+  iou = np.divide(np.diag(conf), conf.sum(0) + conf.sum(1) - np.diag(conf))[1]
 
   return iou
 
 
 def get_instances(image):
   """ Given an image where each instance is a different int value, and
-      background is zero, return a list of polygons where each instance is a
-      polygon
+      background is zero, return a list of bounding boxes and mask values
+      where each instance is a different entity
   """
-  instances = []
+  bboxes = []
+  vals = []
 
   # sanity check
   assert(len(image.shape) == 2)
@@ -105,57 +115,35 @@ def get_instances(image):
   # instances are given from 1 to N, and may contain skipping values, so we
   # need a histogram of the pixels in the image and only add the ones containing
   # pixels to the range.
-  poly_range = []
+  val_range = []
   hist_bins = np.amax(image) + 1
   hist = np.bincount(image.flatten(), minlength=hist_bins)
 
   # get the actual buildings from histogram
   for i in range(1, hist_bins):  # start in 1 to ignore background
     if hist[i] > 0:
-      poly_range.append(i)
+      val_range.append(i)
 
-  # for each patch of value val, convert to polygon and append to
-  # list of polygons
-  for val in poly_range:
-    # time_start = time.time()
+  # for each patch of value val, convert to bbox and append to lists
+  for val in val_range:
     # get the mask
-    poly_mask = cv2.compare(image, val, cv2.CMP_EQ)
+    bin_mask = cv2.compare(image, val, cv2.CMP_EQ)
 
-    # convert to poly using contours
-    img, poly, _ = cv2.findContours(
-        poly_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # convert to bbox
+    instance_points = cv2.findNonZero(bin_mask)
+    x, y, w, h = cv2.boundingRect(instance_points)
 
-    # ignore all poligons with less than 3 coordinates.
-    try:
-      shapely_poly = np.reshape(poly[0], [poly[0].shape[0], poly[0].shape[2]])
-      shapely_poly = geometry.Polygon(shapely_poly)
+    # bbox to polygon
+    bbox = geometry.box(x, y, x + w, y + h)
 
-      # if it is not valid, validate with buffer(0) method
-      if shapely_poly.is_valid:
-        instances.append(shapely_poly)
-      else:
-        shapely_poly = shapely_poly.buffer(0)
-        if shapely_poly.is_valid:
-          instances.append(shapely_poly)
-    except Exception:
-      print("Warning: Ignoring polygon: ",
-            poly[0], " because it is not a valid geometry")
+    # append to lists
+    bboxes.append(bbox)
+    vals.append(val)
 
-    # elapsed = time.time() - time_start
-    # print("poly time: ", elapsed)
-
-    # cv2.namedWindow("img", cv2.WINDOW_NORMAL)
-    # print("contour type", type(poly))
-    # print("contour: ", poly)
-    # cv2.drawContours(img, poly, -1, (0, 255, 0), 50)
-
-    # cv2.imshow("img", img)
-    # cv2.waitKey(1)
-
-  return instances
+  return bboxes, vals
 
 
-def poly_to_poly_struct(instances, instance_type=""):
+def inst_to_inst_struct(bboxes, values, instance_type=""):
   """
     Fill the standard structure for instances depending on each class of
     instance
@@ -163,46 +151,48 @@ def poly_to_poly_struct(instances, instance_type=""):
   if instance_type == "label":
     # each label instance is a polygon, and a flag if it has been detected or not
     # as a dictionary
-    struct_instances = [{"polygon": poly, "marked": False}
-                        for poly in instances]
-    strtree_instances = strtree.STRtree(instances)
+    struct_instances = [{"bbox": bbox, "val": val, "marked": False}
+                        for bbox, val in zip(bboxes, values)]
+    strtree_instances = strtree.STRtree(bboxes)
     return struct_instances, strtree_instances
   elif instance_type == "prediction":
     # each mask instance is a polygon
-    struct_instances = [{"polygon": poly, "iou": 0, "label_poly_idx": -1}
-                        for poly in instances]
+    struct_instances = [{"bbox": bbox, "val": val, "iou": 0, "label_bbox_idx": -1}
+                        for bbox, val in zip(bboxes, values)]
     return struct_instances
   else:
     print("Invalid instance type: ", str(instance_type))
     sys.exit(-1)
 
 
-def match_instances(instance, label_instances, label_instances_strtree):
-  """ Given an instance polygon, and a list of polygons and marks, return:
+def match_instances(instance, label_instances, label_instances_strtree, sub_np, lbl_np):
+  """ Given an instance bbox, and a list of label bboxes and marks, along with the
+      original images as a numpy array, return:
       The IoU with an instance of ground truth if it corresponds.
       The index of that ground truth index if it corresponds.
       Each polygon gets matched to the biggest corresponding IoU in the GT.
   """
 
   # query all labels that intersect with the instance
-  intersection = label_instances_strtree.query(instance["polygon"])
+  intersection = label_instances_strtree.query(instance["bbox"])
 
   # get all struct instances that are in intersection. This is suboptimal, but
   # until I find a way to piggy back the info into the strtree I can't deal
   # with it differently
   instance_intersection = []
   for inst in label_instances:
-    if inst in intersection:
+    if inst["bbox"] in intersection:
       instance_intersection.append(inst)
 
   # check each label instance with the instance
   for lbl_instance in instance_intersection:
     # if iou with this instance is bigger than the IoU contained in the
     # prediction, match them
-    iou = polygon_iou(instance["polygon"], lbl_instance["polygon"])
+    iou = inst_iou(instance["bbox"], instance["val"], sub_np,
+                   lbl_instance["bbox"], lbl_instance["val"], lbl_np)
     if iou > instance["iou"]:
       instance["iou"] = iou
-      instance["label_poly_idx"] = label_instances.index(lbl_instance)
+      instance["label_bbox_idx"] = label_instances.index(lbl_instance)
   return
 
 
@@ -230,9 +220,9 @@ def calculate_AP_for_iou_single_image(mask, label, IoU_th):
     if instance["iou"] > IoU_th:
       # and the instance hasn't been detected yet, mark as true positive, and
       # mark the GT instance as already detected.
-      if label[instance["label_poly_idx"]]["marked"] is False:
+      if label[instance["label_bbox_idx"]]["marked"] is False:
         TP += 1
-        label[instance["label_poly_idx"]]["marked"] = True
+        label[instance["label_bbox_idx"]]["marked"] = True
       else:
         FP += 1
     else:
