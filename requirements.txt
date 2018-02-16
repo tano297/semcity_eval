@@ -1,0 +1,5 @@
+Shapely==1.6.4.post1
+numpy==1.11.0
+opencv_python==3.4.0.12
+Pillow==5.0.0
+PyYAML==3.12
