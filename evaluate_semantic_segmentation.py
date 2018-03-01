@@ -141,9 +141,9 @@ if __name__ == '__main__':
   for s in submissions:
     print("Calculating metrics for image ", s)
     # open submission
-    sub_tif = Image.open(os.path.join(FLAGS.submission_dir, s))
+    sub_tif = Image.open(os.path.join(FLAGS.submission_dir, s)).convert('L')
     # open label
-    lbl_tif = Image.open(os.path.join(FLAGS.label_dir, s))
+    lbl_tif = Image.open(os.path.join(FLAGS.label_dir, s)).convert('L')
     # calculate and append confusion matrix
     conf = metrics.calculate_confusion(
         mask=sub_tif, lbl=lbl_tif, num_classes=num_classes)
